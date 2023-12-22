@@ -17,6 +17,17 @@ const metraData = await fetch('https://gtfsapi.metrarail.com/gtfs/positions', {
 // CTA bus data loading
 const ctaBusTrackerKey = process.env.CTA_BUS_API_KEY;
 
+const routeData = await fetch(
+    `https://ctabustracker.com/bustime/api/v2/getroutes?key=${ctaBusTrackerKey}&format=json`
+)
+    .then(res => res.json())
+    .then(json => json['bustime-response']['routes']);
+
+const routeLookup = {};
+routeData.forEach(route => {
+    routeLookup[route.rt] = route;
+});
+
 async function fetchBusRouteData(route: string) {
     let vehicles = await fetch(
         `https://www.ctabustracker.com/bustime/api/v2/getvehicles?key=${ctaBusTrackerKey}&rt=${route}&format=json`
@@ -46,7 +57,7 @@ async function fetchBusRouteData(route: string) {
     const patternsLookup = {};
     patterns.forEach(pattern => {
         patternsLookup[pattern.pid] = pattern;
-    })
+    });
 
     vehicles = vehicles.map(vehicle => {
         vehicle.pattern = patternsLookup[vehicle.pid];
@@ -54,14 +65,22 @@ async function fetchBusRouteData(route: string) {
         return vehicle;
     });
 
-    return vehicles;
+    return {
+        id: routeLookup[route].rt,
+        rtnm: routeLookup[route].rtnm,
+        directions,
+        stops,
+        patterns,
+        vehicles
+    }
 }
 
-const desiredBusRoutes = ['74', '76'];
-const busVehicleData = await Promise.all(desiredBusRoutes.map(route => fetchBusRouteData(route)))
-    .then(routeResults => routeResults.reduce((allResults, currentResults) => (
-        allResults.concat(currentResults)
-    ), []));
+const preloadBusRoutes = ['74', '76'];
+const busRouteData = await Promise.all(preloadBusRoutes.map(route => fetchBusRouteData(route)));
+const busRouteLookup = {};
+busRouteData.forEach(route => {
+    busRouteLookup[route.id] = route;
+});
 
 // CTA train data loading
 // const ctaTrainTrackerKey = process.env.CTA_RAIL_API_KEY;
@@ -88,7 +107,7 @@ const typeDefs = `#graphql
         pt: [Point]
     }
 
-    type Bus {
+    type BusVehicle {
         vid: String
         lat: String
         lon: String
@@ -104,8 +123,15 @@ const typeDefs = `#graphql
         zone: String
     }
 
+    type BusRoute {
+        id: String
+        rtnm: String
+        directions: [String]
+        vehicles: [BusVehicle]
+    }
+
     type Cta {
-        buses: [Bus]
+        busRoute(id: String!): BusRoute
     }
 
     type Metra {
@@ -121,7 +147,10 @@ const typeDefs = `#graphql
 const resolvers = {
     Query: {
         metra: () => ({ trains: metraData }),
-        cta: () => ({ buses: busVehicleData }),
+        cta: () => ({}),
+    },
+    Cta: {
+        busRoute: (_, args) => busRouteLookup[args.id],
     }
 };
 
