@@ -16,10 +16,52 @@ const metraData = await fetch('https://gtfsapi.metrarail.com/gtfs/positions', {
 
 // CTA bus data loading
 const ctaBusTrackerKey = process.env.CTA_BUS_API_KEY;
-const route = '74,76';
-const busData = await fetch(
-    `https://www.ctabustracker.com/bustime/api/v2/getvehicles?key=${ctaBusTrackerKey}&rt=${route}&format=json`
-).then(res => res.json());
+
+async function fetchBusRouteData(route: string) {
+    let vehicles = await fetch(
+        `https://www.ctabustracker.com/bustime/api/v2/getvehicles?key=${ctaBusTrackerKey}&rt=${route}&format=json`
+    )
+        .then(res => res.json())
+        .then(json => json['bustime-response']['vehicle']);
+
+    const directions = await fetch(
+        `http://www.ctabustracker.com/bustime/api/v2/getdirections?key=${ctaBusTrackerKey}&rt=${route}&format=json`
+    )
+        .then(res => res.json())
+        .then(json => json['bustime-response']['directions'].map(direction => direction.dir));
+
+    const stops = await Promise.all(directions.map(direction => (
+        fetch(
+            `http://www.ctabustracker.com/bustime/api/v2/getstops?key=${ctaBusTrackerKey}&rt=${route}&dir=${direction}&format=json`
+        )
+            .then(res => res.json())
+            .then(json => json['bustime-response']['stops'])
+    )));
+
+    const patterns = await fetch(
+        `http://www.ctabustracker.com/bustime/api/v2/getpatterns?key=${ctaBusTrackerKey}&rt=${route}&format=json`
+    )
+        .then(res => res.json())
+        .then(json => json['bustime-response']['ptr']);
+    const patternsLookup = {};
+    patterns.forEach(pattern => {
+        patternsLookup[pattern.pid] = pattern;
+    })
+
+    vehicles = vehicles.map(vehicle => {
+        vehicle.pattern = patternsLookup[vehicle.pid];
+        delete vehicle.pid;
+        return vehicle;
+    });
+
+    return vehicles;
+}
+
+const desiredBusRoutes = ['74', '76'];
+const busVehicleData = await Promise.all(desiredBusRoutes.map(route => fetchBusRouteData(route)))
+    .then(routeResults => routeResults.reduce((allResults, currentResults) => (
+        allResults.concat(currentResults)
+    ), []));
 
 // CTA train data loading
 // const ctaTrainTrackerKey = process.env.CTA_RAIL_API_KEY;
@@ -29,12 +71,29 @@ const typeDefs = `#graphql
         id: String
     }
 
+    type Point {
+        seq: Int
+        lat: Float
+        lon: Float
+        typ: String
+        stpid: String
+        stpnm: String
+        pdist: Int
+    }
+
+    type Pattern {
+        pid: Int
+        ln: Int
+        rtdir: String
+        pt: [Point]
+    }
+
     type Bus {
         vid: String
         lat: String
         lon: String
         hdg: String
-        pid: Int
+        pattern: Pattern
         rt: String
         des: String
         pdist: Int
@@ -62,7 +121,7 @@ const typeDefs = `#graphql
 const resolvers = {
     Query: {
         metra: () => ({ trains: metraData }),
-        cta: () => ({ buses: busData['bustime-response']['vehicle'] })
+        cta: () => ({ buses: busVehicleData }),
     }
 };
 

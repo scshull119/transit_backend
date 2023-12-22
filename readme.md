@@ -8,7 +8,12 @@ This application is a microservice for collecting and serving real-time informat
 ### Usage
 1. `nvm use` (if using [NVM](https://github.com/nvm-sh/nvm) to manage Node versions)
 2. `npm install`
-3. `npm run start`
+3. Set required API credentials as environment variables:
+    * `METRA_API_USERNAME`
+    * `METRA_API_PASSWORD`
+    * `CTA_BUS_API_KEY`
+    * `CTA_RAIL_API_KEY`
+4. `npm run start`
 
 ### Data Sources
 * [CTA Train Tracker API](https://www.transitchicago.com/developers/traintracker/)
