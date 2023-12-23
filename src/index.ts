@@ -34,6 +34,22 @@ async function fetchBusRouteData(route: string) {
     )
         .then(res => res.json())
         .then(json => json['bustime-response']['vehicle']);
+    let vids = vehicles.map(vehicle => vehicle.vid);
+    const vidBatches = [];
+    while (vids.length) {
+        let batch = vids.slice(0, 10);
+        vids = vids.slice(10);
+        vidBatches.push(batch);
+    }
+
+    const predictions = await Promise.all(vidBatches.map(batch => {
+        const vidString = batch.join(',');
+        return fetch(
+            `http://www.ctabustracker.com/bustime/api/v2/getpredictions?key=${ctaBusTrackerKey}&vid=${vidString}&format=json`
+        )
+            .then(res => res.json())
+            .then(json => json['bustime-response']['prd']);
+    })).then(responseBatches => responseBatches.reduce((prev, batch) => prev.concat(batch), []));
 
     const directions = await fetch(
         `http://www.ctabustracker.com/bustime/api/v2/getdirections?key=${ctaBusTrackerKey}&rt=${route}&format=json`
@@ -61,6 +77,7 @@ async function fetchBusRouteData(route: string) {
 
     vehicles = vehicles.map(vehicle => {
         vehicle.pattern = patternsLookup[vehicle.pid];
+        vehicle.predictions = predictions.filter(prediction => prediction.vid === vehicle.vid);
         delete vehicle.pid;
         return vehicle;
     });
@@ -107,6 +124,26 @@ const typeDefs = `#graphql
         pt: [Point]
     }
 
+    type Prediction {
+        tmstmp: String
+        typ: String
+        stpnm: String
+        stpid: String
+        vid: String
+        dstp: Int
+        rt: String
+        rtdd: String
+        rtdir: String
+        des: String
+        prdtm: String
+        tablockid: String
+        tatripid: String
+        origtatripno: String
+        dly: Boolean
+        prdctdn: String
+        zone: String
+    }
+
     type BusVehicle {
         vid: String
         lat: String
@@ -121,6 +158,7 @@ const typeDefs = `#graphql
         origtatripno: String
         tablockid: String
         zone: String
+        predictions: [Prediction]
     }
 
     type BusRoute {
@@ -163,4 +201,4 @@ const { url } = await startStandaloneServer(server, {
     listen: { port: 4000 },
 });
 
-console.log(`🚀  Server ready at: ${url}`);
+console.log(`🚎 🚉  Server ready at: ${url}`);
