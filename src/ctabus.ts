@@ -19,10 +19,24 @@ routes.forEach(route => {
 });
 
 // Cache objects to store fetched data with route ID as key.
-const realTimeRouteData = {};
+let realTimeRouteData = {};
 const evergreenRouteData = {};
 
 let recentRoutes = [];
+
+// Set-up refresh interval for real-time data
+setInterval(async () => {
+    recentRoutes = recentRoutes.filter(route => route.timestamp > Date.now() - 600000);
+    const routesToRefresh = recentRoutes.map(route => route.rt);
+    console.log(`Refreshing real-time route data for routes: ${routesToRefresh.join(',')}`);
+    const freshData = await fetchBusRoutesData(routesToRefresh);
+    const freshCache = {};
+    freshData.forEach(route => {
+        freshCache[route.id] = route;
+    });
+    realTimeRouteData = freshCache;
+
+}, 60000);
 
 export async function getBusRouteData(routeId: string) {
     // Validate routeId and throw error if it is not a valid CTA bus route
@@ -32,6 +46,8 @@ export async function getBusRouteData(routeId: string) {
 
     // If route data is already cached, just return the cached data.
     if (realTimeRouteData[routeId]) {
+        console.log(`Returning cached real-time data for route ${routeId}`);
+        recentRoutes.filter(route => route.rt === routeId)[0].timestamp = Date.now();
         return {
             ...realTimeRouteData[routeId],
             ...await getEvergreenRouteData(routeId),
@@ -56,12 +72,17 @@ export async function getBusRouteData(routeId: string) {
 }
 
 async function fetchBusRoutes() {
+    console.log('Initializing bus route data.');
     return fetch(ROUTES_URL)
         .then(res => res.json())
         .then(json => json['bustime-response']['routes']);
 }
 
 async function fetchBusRoutesData(routeIds: string[]) {
+    if (!routeIds.length) {
+        console.log('No route IDs to fetch data for.');
+        return [];
+    }
     const requestBatches = chunkArray(routeIds, 10);
     const batchResponses =  await Promise.all(requestBatches.map(batch => fetchBusRouteBatchData(batch)));
 
@@ -70,6 +91,7 @@ async function fetchBusRoutesData(routeIds: string[]) {
 }
 
 async function fetchBusRouteBatchData(routeIds: string[]) {
+    console.log(`Fetching real-time bus data for routes: ${routeIds.join(',')}`);
     if (routeIds.length > 10) {
         throw new Error(`Requested route vehicle data for ${routeIds.length} routes. Max is 10 routes per request.`);
     }
@@ -94,6 +116,10 @@ function fetchVehiclesData(routeIds: string[]) {
 }
 
 async function fetchPredictionsData(vehicleIds: string[]) {
+    if (!vehicleIds.length) {
+        console.log('No vechicle IDs to fetch predictions data for.');
+        return [];
+    }
     const requestBatches: string[][] = chunkArray(vehicleIds, 10);
     const batchResponses = await Promise.all(requestBatches.map(batch => fetchPredictionsBatchData(batch)));
 
@@ -102,6 +128,7 @@ async function fetchPredictionsData(vehicleIds: string[]) {
 }
 
 function fetchPredictionsBatchData(vehicleIds: string[]) {
+    console.log(`Fetching real-time predictions data for vehicles: ${vehicleIds.join(',')}`);
     if (vehicleIds.length > 10) {
         throw new Error(`Requested predictions data for ${vehicleIds.length} routes. Max is 10 vehicles per request.`);
     }
@@ -114,8 +141,11 @@ function fetchPredictionsBatchData(vehicleIds: string[]) {
 async function getEvergreenRouteData(routeId: string) {
     // Use cached data if it is available
     if (evergreenRouteData[routeId]) {
+        console.log(`Returning cached evergreen data for route ${routeId}.`);
         return Promise.resolve(evergreenRouteData[routeId]);
     }
+
+    console.log(`Fetching evergreen data from route ${routeId}.`);
     const directions = await fetch(`${BASE_DIRECTIONS_URL}&rt=${routeId}`)
         .then(res => res.json())
         .then(json => json['bustime-response']['directions'].map(direction => direction.dir));

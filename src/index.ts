@@ -15,8 +15,6 @@ const metraData = await fetch('https://gtfsapi.metrarail.com/gtfs/positions', {
     }
 }).then(res => res.json());
 
-const busRouteLookup = { '74': await getBusRouteData('74') };
-
 // CTA train data loading
 // const ctaTrainTrackerKey = process.env.CTA_RAIL_API_KEY;
 
@@ -107,7 +105,7 @@ const resolvers = {
         cta: () => ({}),
     },
     Cta: {
-        busRoute: (_, args) => busRouteLookup[args.id],
+        busRoute: (_, args) => getBusRouteData(args.id),
     }
 };
 
