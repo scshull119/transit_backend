@@ -1,6 +1,7 @@
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { Buffer } from 'node:buffer';
+import { getBusRouteData } from './ctabus.js';
 
 // Metra Rail data loading
 const metraU = process.env.METRA_API_USERNAME;
@@ -14,90 +15,7 @@ const metraData = await fetch('https://gtfsapi.metrarail.com/gtfs/positions', {
     }
 }).then(res => res.json());
 
-// CTA bus data loading
-const ctaBusTrackerKey = process.env.CTA_BUS_API_KEY;
-
-const routeData = await fetch(
-    `https://ctabustracker.com/bustime/api/v2/getroutes?key=${ctaBusTrackerKey}&format=json`
-)
-    .then(res => res.json())
-    .then(json => json['bustime-response']['routes']);
-
-const routeLookup = {};
-routeData.forEach(route => {
-    routeLookup[route.rt] = route;
-});
-
-async function fetchBusRouteData(route: string) {
-    let vehicles = await fetch(
-        `https://www.ctabustracker.com/bustime/api/v2/getvehicles?key=${ctaBusTrackerKey}&rt=${route}&format=json`
-    )
-        .then(res => res.json())
-        .then(json => json['bustime-response']['vehicle']);
-    let vids = vehicles.map(vehicle => vehicle.vid);
-    const vidBatches = [];
-    while (vids.length) {
-        let batch = vids.slice(0, 10);
-        vids = vids.slice(10);
-        vidBatches.push(batch);
-    }
-
-    const predictions = await Promise.all(vidBatches.map(batch => {
-        const vidString = batch.join(',');
-        return fetch(
-            `http://www.ctabustracker.com/bustime/api/v2/getpredictions?key=${ctaBusTrackerKey}&vid=${vidString}&format=json`
-        )
-            .then(res => res.json())
-            .then(json => json['bustime-response']['prd']);
-    })).then(responseBatches => responseBatches.reduce((prev, batch) => prev.concat(batch), []));
-
-    const directions = await fetch(
-        `http://www.ctabustracker.com/bustime/api/v2/getdirections?key=${ctaBusTrackerKey}&rt=${route}&format=json`
-    )
-        .then(res => res.json())
-        .then(json => json['bustime-response']['directions'].map(direction => direction.dir));
-
-    const stops = await Promise.all(directions.map(direction => (
-        fetch(
-            `http://www.ctabustracker.com/bustime/api/v2/getstops?key=${ctaBusTrackerKey}&rt=${route}&dir=${direction}&format=json`
-        )
-            .then(res => res.json())
-            .then(json => json['bustime-response']['stops'])
-    )));
-
-    const patterns = await fetch(
-        `http://www.ctabustracker.com/bustime/api/v2/getpatterns?key=${ctaBusTrackerKey}&rt=${route}&format=json`
-    )
-        .then(res => res.json())
-        .then(json => json['bustime-response']['ptr']);
-    const patternsLookup = {};
-    patterns.forEach(pattern => {
-        patternsLookup[pattern.pid] = pattern;
-    });
-
-    vehicles = vehicles.map(vehicle => {
-        vehicle.pattern = patternsLookup[vehicle.pid];
-        vehicle.predictions = predictions.filter(prediction => prediction.vid === vehicle.vid);
-        delete vehicle.pid;
-        return vehicle;
-    });
-
-    return {
-        id: routeLookup[route].rt,
-        rtnm: routeLookup[route].rtnm,
-        directions,
-        stops,
-        patterns,
-        vehicles
-    }
-}
-
-const preloadBusRoutes = ['74', '76'];
-const busRouteData = await Promise.all(preloadBusRoutes.map(route => fetchBusRouteData(route)));
-const busRouteLookup = {};
-busRouteData.forEach(route => {
-    busRouteLookup[route.id] = route;
-});
+const busRouteLookup = { '74': await getBusRouteData('74') };
 
 // CTA train data loading
 // const ctaTrainTrackerKey = process.env.CTA_RAIL_API_KEY;
@@ -149,7 +67,7 @@ const typeDefs = `#graphql
         lat: String
         lon: String
         hdg: String
-        pattern: Pattern
+        pid: String
         rt: String
         des: String
         pdist: Int
@@ -166,6 +84,7 @@ const typeDefs = `#graphql
         rtnm: String
         directions: [String]
         vehicles: [BusVehicle]
+        patterns: [Pattern]
     }
 
     type Cta {
